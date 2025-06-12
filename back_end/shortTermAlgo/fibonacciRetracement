@@ -1,0 +1,71 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# Load your CSV
+df = pd.read_csv('chart.csv')
+df['DateTime'] = pd.to_datetime(df['DateTime'])
+df.set_index('DateTime', inplace=True)
+
+# Use closing price (assuming 'RELIANCEEQN' is your price column)
+df['Price'] = df['RELIANCEEQN'].ffill()  # Forward fill missing values
+
+# Simplified swing detection (using rolling windows)
+window_size = 20  # Adjust based on your timeframe
+df['SwingHigh'] = df['Price'].rolling(window_size).max()
+df['SwingLow'] = df['Price'].rolling(window_size).min()
+
+# Get the most recent significant swing high/low
+swing_high = df['SwingHigh'].dropna().iloc[-1]
+swing_low = df['SwingLow'].dropna().iloc[-1]
+
+# Calculate Fibonacci levels
+def get_fib_levels(high, low):
+    diff = high - low
+    return {
+        '0%': high,
+        '23.6%': high - diff * 0.236,
+        '38.2%': high - diff * 0.382,
+        '50%': high - diff * 0.5,
+        '61.8%': high - diff * 0.618,
+        '78.6%': high - diff * 0.786,
+        '100%': low
+    }
+
+fib_levels = get_fib_levels(swing_high, swing_low)
+
+# Detect if current price is near a Fib level (within 0.5% threshold)
+current_price = df['Price'].iloc[-1]
+trade_signal = None
+for level, price in fib_levels.items():
+    if abs(current_price - price) < 0.005 * swing_high:  # 0.5% threshold
+        # Determine direction based on recent trend
+        trend = "Up" if df['Price'].iloc[-10:].mean() > df['Price'].iloc[-20:-10].mean() else "Down"
+        trade_signal = {
+            'Level': level,
+            'Price': round(price, 2),
+            'Action': 'BUY' if (level in ['38.2%', '50%', '61.8%'] and trend == "Up") else 'SELL',
+            'Confidence': 'High' if level in ['38.2%', '61.8%'] else 'Medium'
+        }
+        break
+
+# Plotting
+plt.figure(figsize=(14, 7))
+plt.plot(df.index, df['Price'], label='Price', linewidth=1)
+plt.axhline(y=swing_high, color='r', linestyle='--', label='Swing High')
+plt.axhline(y=swing_low, color='g', linestyle='--', label='Swing Low')
+
+for level, price in fib_levels.items():
+    plt.axhline(y=price, color='orange', linestyle=':', label=f'Fib {level}')
+
+plt.title('Reliance Intraday with Fibonacci Retracement')
+plt.legend()
+plt.grid()
+plt.show()
+
+# Print trade signal if detected
+if trade_signal:
+    print("\n=== Trade Signal ===")
+    print(f"Price near Fib {trade_signal['Level']} ({trade_signal['Price']})")
+    print(f"Action: {trade_signal['Action']} ({trade_signal['Confidence']} confidence)")
+else:
+    print("\nNo trade signal at current levels.")
