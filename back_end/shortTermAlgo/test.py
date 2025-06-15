@@ -1,154 +1,186 @@
 import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.ticker import MaxNLocator
+import yfinance as yf
+from datetime import datetime, timedelta
 
-# --- CONFIGURATION ---
-SWING_WINDOW = 30        # Number of candles to look back for swing detection
-MIN_SWING_PCT = 0.4      # Minimum price movement (%) to qualify as a swing
-SMOOTHING_PERIOD = 5     # EMA period for noise reduction
-FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0]  # Standard Fibonacci levels
+# Configuration
+TICKER = "SBIN.NS"  # SBI stock on NSE
+INTRADAY_TIMEFRAME = "15m"  # 15-minute candles for intraday
+SWING_ANALYSIS_DAYS = 15  # Look back 15 days for swing points
+MIN_SWING_MOVE_PCT = 1.5  # Minimum price movement to qualify as a swing
 
-# --- DATA LOADING & PREPROCESSING ---
-def load_data(filepath):
-    """Load and preprocess the CSV file"""
-    df = pd.read_csv(filepath)
+def fetch_stock_data():
+    """Fetch historical data from Yahoo Finance with multiple timeframes"""
+    end_date = datetime.now()
     
-    # Auto-detect datetime and price columns
-    datetime_col = None
-    price_col = None
+    # If it's weekend, use last Friday as end date
+    if end_date.weekday() >= 5:  # Saturday=5, Sunday=6
+        days_back = end_date.weekday() - 4  # Go back to Friday
+        end_date = end_date - timedelta(days=days_back)
     
-    # Find datetime column (look for 'time', 'date' etc)
-    for col in df.columns:
-        if any(keyword in col.lower() for keyword in ['time', 'date', 'datetime']):
-            datetime_col = col
-            break
-    if datetime_col is None:
-        datetime_col = df.columns[0]  # Fallback to first column
+    start_date = end_date - timedelta(days=SWING_ANALYSIS_DAYS)
     
-    # Find price column (look for 'price', 'close' etc)
-    for col in df.columns:
-        if any(keyword in col.lower() for keyword in ['price', 'close', 'last', 'value']):
-            price_col = col
-            break
-    if price_col is None:
-        price_col = df.columns[-1]  # Fallback to last column
+    # Fetch data with auto_adjust explicitly set to avoid warnings
+    intraday_data = yf.download(
+        TICKER,
+        start=start_date,
+        end=end_date,
+        interval=INTRADAY_TIMEFRAME,
+        progress=False,
+        auto_adjust=True
+    )
     
-    print(f"Detected columns - DateTime: '{datetime_col}', Price: '{price_col}'")
+    daily_data = yf.download(
+        TICKER,
+        start=start_date - timedelta(days=30),  # Extra buffer
+        end=end_date,
+        interval="1d",
+        progress=False,
+        auto_adjust=True
+    )
     
-    # Convert and clean data
-    df['DateTime'] = pd.to_datetime(df[datetime_col])
-    df.set_index('DateTime', inplace=True)
-    df['Price'] = pd.to_numeric(df[price_col], errors='coerce').ffill()
-    
-    return df
+    return intraday_data, daily_data
 
-# --- SWING DETECTION ---
-def detect_swings(price_series, window=SWING_WINDOW, min_pct=MIN_SWING_PCT):
-    """Identify significant swing highs and lows"""
-    highs, lows = [], []
+def detect_swings(df, min_move_pct=MIN_SWING_MOVE_PCT):
+    """Identify the most significant swing in the given dataframe"""
+    # Check if dataframe is empty
+    if df.empty:
+        return None, None, None, None, None
     
-    for i in range(window, len(price_series)-window):
-        current = price_series.iloc[i]
-        lookback = price_series.iloc[i-window:i+window]
+    # Check if Volume column exists and filter out non-trading periods
+    if 'Volume' in df.columns:
+        try:
+            # Handle NaN values and create volume mask safely
+            volume_series = df['Volume'].fillna(0)  # Replace NaN with 0
+            volume_mask = volume_series > 0
+            
+            # Check if any valid trading periods exist
+            if not volume_mask.any():  # If no trading periods found
+                return None, None, None, None, None
+            
+            df_filtered = df.loc[volume_mask].copy()
+        except Exception as e:
+            print(f"Volume filtering error: {e}")
+            # If volume filtering fails, use all data
+            df_filtered = df.copy()
+    else:
+        # If no Volume column, use all data
+        df_filtered = df.copy()
+    
+    # Check if filtered dataframe is empty
+    if df_filtered.empty:
+        return None, None, None, None, None
+    
+    # Find highest high and lowest low
+    swing_high = df_filtered['High'].max()
+    swing_low = df_filtered['Low'].min()
+    
+    # Check for NaN values
+    if pd.isna(swing_high) or pd.isna(swing_low):
+        return None, None, None, None, None
+    
+    move_pct = ((swing_high - swing_low) / swing_low) * 100
+    
+    if move_pct >= min_move_pct:
+        # Get the first occurrence of the swing high and low
+        high_mask = df_filtered['High'] == swing_high
+        low_mask = df_filtered['Low'] == swing_low
         
-        # Check for swing high
-        if current == lookback.max():
-            move_pct = (current - lookback.min()) / lookback.min() * 100
-            if move_pct >= min_pct:
-                highs.append((price_series.index[i], current))
+        # Check if any matches found
+        if not high_mask.any() or not low_mask.any():
+            return None, None, None, None, None
         
-        # Check for swing low
-        elif current == lookback.min():
-            move_pct = (lookback.max() - current) / current * 100
-            if move_pct >= min_pct:
-                lows.append((price_series.index[i], current))
-    
-    return pd.DataFrame(highs, columns=['Time', 'High']), pd.DataFrame(lows, columns=['Time', 'Low'])
+        high_time = df_filtered[high_mask].index[0]
+        low_time = df_filtered[low_mask].index[0]
+        
+        return swing_high, swing_low, high_time, low_time, move_pct
+    return None, None, None, None, None
 
-# --- FIBONACCI CALCULATIONS ---
-def calculate_fib_levels(swing_high, swing_low):
-    """Calculate Fibonacci retracement levels"""
-    price_diff = swing_high - swing_low
-    return {f"{level*100:.1f}%": swing_high - price_diff * level for level in FIB_LEVELS}
-
-# --- VISUALIZATION ---
-def plot_fibonacci(df, swing_high, swing_low, fib_levels):
-    """Create the Fibonacci retracement plot"""
-    plt.figure(figsize=(15, 7))
+def plot_fibonacci(df, swing_high, swing_low, high_time, low_time, move_pct):
+    """Visualize the Fibonacci retracement levels"""
+    # Calculate Fib levels
+    fib_levels = {
+        '0% (High)': swing_high,
+        '23.6%': swing_high - (swing_high - swing_low) * 0.236,
+        '38.2%': swing_high - (swing_high - swing_low) * 0.382,
+        '50%': swing_high - (swing_high - swing_low) * 0.5,
+        '61.8%': swing_high - (swing_high - swing_low) * 0.618,
+        '78.6%': swing_high - (swing_high - swing_low) * 0.786,
+        '100% (Low)': swing_low
+    }
     
-    # Plot price data
-    plt.plot(df.index, df['Price'], color='dodgerblue', alpha=0.4, label='Price')
-    plt.plot(df.index, df['Smoothed'], color='navy', linewidth=1.5, label='Smoothed')
+    # Plotting
+    plt.figure(figsize=(15, 8))
     
-    # Mark swing points
-    plt.scatter(swing_high['Time'], swing_high['High'], color='red', s=100, label='Swing High')
-    plt.scatter(swing_low['Time'], swing_low['Low'], color='green', s=100, label='Swing Low')
+    # Price data
+    plt.plot(df.index, df['Close'], label='Price', color='navy', linewidth=1.5)
     
-    # Draw Fibonacci levels
-    for level, price in fib_levels.items():
-        plt.axhline(y=price, linestyle='--', alpha=0.7, 
-                   label=f'Fib {level} ({price:.2f})')
+    # Swing markers
+    plt.scatter(high_time, swing_high, color='red', s=100, label='Swing High', zorder=5)
+    plt.scatter(low_time, swing_low, color='green', s=100, label='Swing Low', zorder=5)
+    
+    # Fibonacci levels
+    colors = ['red', 'orange', 'gold', 'green', 'teal', 'purple', 'blue']
+    for (level, price), color in zip(fib_levels.items(), colors):
+        plt.axhline(price, color=color, linestyle='--', alpha=0.7, label=f'Fib {level}')
     
     # Formatting
-    plt.title('Fibonacci Retracement Analysis', pad=20)
+    plt.title(f'SBI Fibonacci Retracement | {INTRADAY_TIMEFRAME} Data | {move_pct:.2f}% Move', pad=20)
     plt.xlabel('Time')
-    plt.ylabel('Price')
+    plt.ylabel('Price (₹)')
     plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left')
     plt.grid(alpha=0.3)
-    plt.gca().xaxis.set_major_locator(MaxNLocator(15))  # Limit x-axis ticks
-    plt.xticks(rotation=45)
     plt.tight_layout()
     plt.show()
-
-# --- MAIN EXECUTION ---
-def main():
-    try:
-        # Load and prepare data
-        df = load_data('chart.csv')
-        df['Smoothed'] = df['Price'].ewm(span=SMOOTHING_PERIOD).mean()
-        
-        # Detect swings
-        swing_highs, swing_lows = detect_swings(df['Smoothed'])
-        
-        if len(swing_highs) == 0 or len(swing_lows) == 0:
-            raise ValueError("No valid swings detected. Try adjusting SWING_WINDOW or MIN_SWING_PCT")
-        
-        # Get most recent swing high/low
-        last_high = swing_highs.iloc[-1]
-        last_low = swing_lows.iloc[-1]
-        
-        # Determine swing direction
-        if last_high['Time'] > last_low['Time']:
-            start, end = last_low, last_high
-            direction = "Uptrend"
-        else:
-            start, end = last_high, last_low
-            direction = "Downtrend"
-        
-        # Calculate Fibonacci levels
-        fib_levels = calculate_fib_levels(end['High' if direction == "Uptrend" else 'Low'], 
-                                         start['Low' if direction == "Uptrend" else 'High'])
-        
-        # Generate output
-        current_price = df['Price'].iloc[-1]
-        print(f"\nMarket Direction: {direction}")
-        print(f"Swing Points: {start['Time']} ({start['Low' if direction == 'Uptrend' else 'High']:.2f}) → {end['Time']} ({end['High' if direction == 'Uptrend' else 'Low']:.2f})")
-        print("\nFibonacci Levels:")
-        for level, price in fib_levels.items():
-            dist_pct = (current_price - price) / price * 100
-            print(f"{level:>6}: {price:.2f} | Current: {dist_pct:+.2f}% {'ABOVE' if dist_pct > 0 else 'BELOW'}")
-        
-        # Plot results
-        plot_fibonacci(df, end if direction == "Uptrend" else start, 
-                      start if direction == "Uptrend" else end, fib_levels)
     
-    except Exception as e:
-        print(f"\nError: {str(e)}")
-        print("Possible solutions:")
-        print("- Check your CSV file format (expected columns: DateTime, Price)")
-        print("- Adjust SWING_WINDOW or MIN_SWING_PCT parameters")
-        print("- Ensure you have sufficient data points (at least 100 candles recommended)")
+    # Print levels
+    current_price = df['Close'].iloc[-1]
+    print("\nFibonacci Retracement Levels:")
+    for level, price in fib_levels.items():
+        dist_pct = (current_price - price)/price * 100
+        print(f"{level:<12}: ₹{price:.2f} | Distance from current: {dist_pct:+.2f}%")
 
-if __name__ == "__main__":
-    main()
+# Main execution
+try:
+    # Check if it's weekend
+    today = datetime.now()
+    if today.weekday() >= 5:
+        print(f"Note: Today is {'Saturday' if today.weekday() == 5 else 'Sunday'}. Indian markets are closed.")
+        print("Using data up to last Friday for analysis.\n")
+    
+    print(f"Fetching {SWING_ANALYSIS_DAYS} days of {INTRADAY_TIMEFRAME} data for {TICKER}...")
+    intraday_data, daily_data = fetch_stock_data()
+    
+    # Check if data was fetched successfully
+    if intraday_data.empty and daily_data.empty:
+        print("No data fetched. Please check your internet connection and ticker symbol.")
+    else:
+        print(f"Fetched {len(intraday_data)} intraday records and {len(daily_data)} daily records")
+        
+        # Detect swings in intraday data
+        swing_high, swing_low, high_time, low_time, move_pct = detect_swings(intraday_data)
+        
+        if swing_high is not None and not pd.isna(swing_high):
+            print(f"\nSignificant Intraday Swing Detected ({move_pct:.2f}% move)")
+            print(f"  High: ₹{swing_high:.2f} at {high_time}")
+            print(f"  Low:  ₹{swing_low:.2f} at {low_time}")
+            plot_fibonacci(intraday_data, swing_high, swing_low, high_time, low_time, move_pct)
+        else:
+            print("\nNo significant swing detected in intraday data. Checking daily...")
+            swing_high, swing_low, high_time, low_time, move_pct = detect_swings(daily_data)
+            if swing_high is not None and not pd.isna(swing_high):
+                print(f"\nDaily Swing Detected ({move_pct:.2f}% move)")
+                print(f"  High: ₹{swing_high:.2f} on {high_time.date()}")
+                print(f"  Low:  ₹{swing_low:.2f} on {low_time.date()}")
+                plot_fibonacci(daily_data, swing_high, swing_low, high_time, low_time, move_pct)
+            else:
+                print("No tradable swings found in the given timeframe.")
+                print("Try reducing MIN_SWING_MOVE_PCT or increasing SWING_ANALYSIS_DAYS")
+
+except Exception as e:
+    print(f"\nError: {str(e)}")
+    print("Possible solutions:")
+    print("- Check internet connection")
+    print("- Verify the ticker symbol is correct")
+    print("- Try reducing SWING_ANALYSIS_DAYS parameter")
+    print("- Check if market is open (intraday data might be limited on weekends/holidays)")
