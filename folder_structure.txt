@@ -1,0 +1,34 @@
+technical_analysis_suite/
+├── algorithms/
+│   ├── __init__.py
+│   ├── fibonacci/
+│   │   ├── __init__.py
+│   │   ├── fibonacci_analyzer.py
+│   │   └── fibonacci_utils.py
+│   ├── rsi/                    # Future algorithm
+│   │   ├── __init__.py
+│   │   └── rsi_analyzer.py
+│   └── bollinger_bands/        # Future algorithm
+│       ├── __init__.py
+│       └── bollinger_analyzer.py
+├── streamlit_apps/
+│   ├── __init__.py
+│   ├── main_app.py
+│   ├── pages/
+│   │   ├── __init__.py
+│   │   ├── fibonacci_page.py
+│   │   ├── rsi_page.py         # Future page
+│   │   └── bollinger_page.py   # Future page
+│   └── components/
+│       ├── __init__.py
+│       ├── sidebar.py
+│       └── charts.py
+├── data/
+│   ├── __init__.py
+│   └── data_fetcher.py
+├── utils/
+│   ├── __init__.py
+│   ├── helpers.py
+│   └── config.py
+├── requirements.txt
+└── README.md
