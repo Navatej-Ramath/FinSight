@@ -116,29 +116,6 @@ class DataFetcher:
 
         except Exception as e:
             return {"Error": f"Could not retrieve data for {ticker_symbol}. Please check the ticker. Error: {e}"}
-
-    def get_stock_info(self, ticker: str) -> Dict[str, Any]:
-        """
-        Get basic stock information
-        """
-        try:
-            stock = yf.Ticker(ticker)
-            info = stock.info
-            
-            return {
-                'company_name': info.get('longName', ticker),
-                'sector': info.get('sector', 'N/A'),
-                'industry': info.get('industry', 'N/A'),
-                'market_cap': info.get('marketCap', 0),
-                'current_price': info.get('currentPrice', 0),
-                'currency': info.get('currency', 'INR'),
-                'exchange': info.get('exchange', 'NSE')
-            }
-        except:
-            return {
-                'company_name': ticker, 'sector': 'N/A', 'industry': 'N/A',
-                'market_cap': 0, 'current_price': 0, 'currency': 'INR', 'exchange': 'NSE'
-            }
     
     def get_stock_info(self, ticker: str) -> Dict[str, Any]:
         """

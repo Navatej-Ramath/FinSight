@@ -1,3 +1,3 @@
 """
-module for diff invetsment types
+module for different investment types
 """
