@@ -16,7 +16,7 @@ from streamlit_apps.pages.Insights_and_Analytics import render_prediction_page
 
 # Page configuration
 st.set_page_config(
-    page_title="FinSight Trading Platform",
+    page_title="NeuroTrade AI",
     layout="wide",
     initial_sidebar_state="expanded"
 )
