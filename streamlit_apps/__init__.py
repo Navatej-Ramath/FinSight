@@ -1,0 +1,3 @@
+"""
+Streamlit applications module
+"""

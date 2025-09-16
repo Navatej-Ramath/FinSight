@@ -61,6 +61,84 @@ class DataFetcher:
         except Exception as e:
             error_msg = f"Error fetching data for {ticker}: {str(e)}"
             return None, error_msg
+
+    def get_financial_ratios(self, ticker_symbol: str) -> Dict[str, Any]:
+        """
+        Fetches and calculates key financial ratios for a given stock ticker from Yahoo Finance.
+        """
+        try:
+            stock = yf.Ticker(ticker_symbol)
+            info = stock.info
+            if not info or info.get('trailingEps') is None:
+                return {"Error": f"Could not retrieve valid data for {ticker_symbol}. It might be delisted or an invalid ticker."}
+
+            financials = stock.financials
+            balance_sheet = stock.balance_sheet
+            financials_T = financials.T
+            balance_sheet_T = balance_sheet.T
+
+            asset_turnover = 'Not available'
+            if not financials_T.empty and not balance_sheet_T.empty and len(balance_sheet_T) > 1:
+                try:
+                    total_revenue = financials_T['Total Revenue'].iloc[0]
+                    avg_total_assets = (balance_sheet_T['Total Assets'].iloc[0] + balance_sheet_T['Total Assets'].iloc[1]) / 2
+                    if avg_total_assets != 0:
+                        asset_turnover = total_revenue / avg_total_assets
+                except (KeyError, IndexError, TypeError):
+                    pass
+
+            inventory_turnover = 'Not available'
+            if not financials_T.empty and not balance_sheet_T.empty and len(balance_sheet_T) > 1:
+                try:
+                    cost_of_goods_sold = financials_T['Cost Of Revenue'].iloc[0]
+                    avg_inventory = (balance_sheet_T['Inventory'].iloc[0] + balance_sheet_T['Inventory'].iloc[1]) / 2
+                    if avg_inventory is not None and avg_inventory != 0:
+                        inventory_turnover = cost_of_goods_sold / avg_inventory
+                    elif avg_inventory == 0:
+                        inventory_turnover = 'Not applicable (zero inventory)'
+                except (KeyError, IndexError, TypeError):
+                    pass
+
+            ratios = {
+                "Ticker": ticker_symbol,
+                "Net Margin": info.get('profitMargins'),
+                "ROE": info.get('returnOnEquity'),
+                "Current Ratio": info.get('currentRatio'),
+                "Quick Ratio": info.get('quickRatio'),
+                "Debt/Equity": info.get('debtToEquity'),
+                "P/E Ratio": info.get('trailingPE'),
+                "PEG Ratio": info.get('pegRatio'),
+                "Payout Ratio": info.get('payoutRatio'),
+                "Asset Turnover": asset_turnover,
+                "Inventory Turnover": inventory_turnover,
+            }
+            return ratios
+
+        except Exception as e:
+            return {"Error": f"Could not retrieve data for {ticker_symbol}. Please check the ticker. Error: {e}"}
+
+    def get_stock_info(self, ticker: str) -> Dict[str, Any]:
+        """
+        Get basic stock information
+        """
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            
+            return {
+                'company_name': info.get('longName', ticker),
+                'sector': info.get('sector', 'N/A'),
+                'industry': info.get('industry', 'N/A'),
+                'market_cap': info.get('marketCap', 0),
+                'current_price': info.get('currentPrice', 0),
+                'currency': info.get('currency', 'INR'),
+                'exchange': info.get('exchange', 'NSE')
+            }
+        except:
+            return {
+                'company_name': ticker, 'sector': 'N/A', 'industry': 'N/A',
+                'market_cap': 0, 'current_price': 0, 'currency': 'INR', 'exchange': 'NSE'
+            }
     
     def get_stock_info(self, ticker: str) -> Dict[str, Any]:
         """
@@ -139,12 +217,7 @@ class DataFetcher:
             return False
     
     def get_popular_nse_stocks(self) -> Dict[str, str]:
-        """
-        Get list of popular NSE stocks
         
-        Returns:
-            Dictionary of {ticker: company_name}
-        """
         return {
             'SBIN.NS': 'State Bank of India',
             'RELIANCE.NS': 'Reliance Industries',

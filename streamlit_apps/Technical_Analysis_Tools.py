@@ -12,7 +12,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from pages.stock_visualization_page import render_stock_visualization_page
 from algorithms.fibonacci.fibonacci_analyzer import render_fibonacci_page
 from data.data_fetcher import data_fetcher
-from pages.Prediction import render_prediction_page
+from streamlit_apps.pages.Insights_and_Analytics import render_prediction_page
 
 # Page configuration
 st.set_page_config(
@@ -121,7 +121,7 @@ def main():
     # Main header
     st.markdown("""
     <div class="main-header">
-        <h1>FinSight Trader</h1>
+        <h1>NeuroTrade AI</h1>
         <p>Let the stocks burn 🔥</p>
     </div>
     """, unsafe_allow_html=True)
